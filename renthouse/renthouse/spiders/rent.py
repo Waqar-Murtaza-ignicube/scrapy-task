@@ -10,24 +10,26 @@ class RentSpider(scrapy.Spider):
 
     def parse(self, response):
 
-        self.furnished = response.css("span.label--interior~ span::text").get()
-        self.website_url = response.url
-
         property_link = response.css("li.property")
         for link in property_link:
             property_uri = link.css("a.article__link::attr(href)").get()
+            items = {
+                'website_url': response.url,
+                'furnished': link.css("span.label--interior~ span::text").get()
+            }
             if property_uri:
                 property_page = "https://www.iamexpat.nl" + property_uri
 
-                yield response.follow(property_page, callback=self.property_parser)
+                yield response.follow(property_page, callback=self.property_parser,
+                                      cb_kwargs={'items': items})
 
         next_page = response.css('ul.pager li.pager-current~li a::attr(href)').get()
         if next_page is not None:
             next_page_uri = "https://www.iamexpat.nl" + next_page
-            
+
             yield response.follow(next_page_uri, callback=self.parse)
 
-    def property_parser(self, response):
+    def property_parser(self, response, items):
         """parsing the response from property url"""
         postal_code = response.xpath("//div[@class='field']/div[contains(text(),'Address:')]"
                                      "/../text()")
@@ -50,6 +52,16 @@ class RentSpider(scrapy.Spider):
         surface = response.css(".field:has(span.label--surface)::text")
         has_surface = surface[1].get().strip() if len(surface) > 1 else None
 
+
+        desc = response.css("div.property__body-section h2")
+        desc_p_elements = desc.xpath("//div[contains(text(), 'Description:')]/../../p/text()")
+
+        if desc_p_elements:
+            description = desc_p_elements
+        else:
+            description = desc.xpath("//div[contains(text(), 'Description:')]"
+                                     "/../../text()").getall()
+
         # making an instance of class
         house_item = HouseItem()
 
@@ -61,15 +73,15 @@ class RentSpider(scrapy.Spider):
         house_item["postal_code"] = has_postal_code
         house_item["surface"] = has_surface
         house_item["bedrooms"] = has_bedrooms
-        house_item["furnished"] = self.furnished
+        house_item["furnished"] = items['furnished']
         house_item["bath"] = has_baths
         house_item["pet_friendly"] = has_pets
         house_item["photo"] = response.css(".gallery img::attr(srcset)").get()
-        house_item["description"] = response.css("div.property__body-section::text").getall()
         house_item["price"] = response.css("p.price-wrapper .property__price::text").get()
+        house_item["description"] = description
         house_item["income_requirement"] = has_deposit
         house_item["realtor"] = response.css(".property__main-info a::text").get()
         house_item["realtor_link"] = response.css(".property__main-info a::attr(href)").get()
-        house_item["website"] = self.website_url
+        house_item["website"] = items['website_url']
 
         yield house_item
